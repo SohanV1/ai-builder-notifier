@@ -18,6 +18,7 @@ import http from 'node:http';
 import { formatNotification, evaluateReply, analyzeDiff, getGitDiff } from './utils.js';
 import { comprehendMessage, appendHistory, generateChatReply } from './comprehend.js';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -337,7 +338,8 @@ export function setupChatBridge(sock) {
               path.join(os.homedir(), '.gemini', 'antigravity-cli', 'bin', 'agentapi'),
               '/home/sohan/.gemini/antigravity-cli/bin/agentapi'
             ].find(p => fs.existsSync(p)) || 'agentapi';
-            spawnSync(agentapiBin, ['send-message', '--title=WhatsApp from User', convoId, `[From WhatsApp] ${body}`], { timeout: 5000 });
+            const child = spawn(agentapiBin, ['send-message', '--title=WhatsApp from User', convoId, `[From WhatsApp] ${body}`], { stdio: 'ignore', detached: true });
+            child.unref();
           } catch (e) {
             console.error('[ai-notify-bridge] agentapi error:', e.message);
           }

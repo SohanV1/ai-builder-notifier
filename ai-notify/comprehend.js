@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const CONFIG_DIR = process.env.AI_NOTIFY_CONFIG_DIR || path.join(os.homedir(), '.config', 'ai-notify');
 const CONVO_FILE = path.join(CONFIG_DIR, 'conversation.json');
@@ -57,24 +57,68 @@ export function clearHistory() {
 }
 
 /**
- * Fast heuristic classifier
+ * Fast heuristic classifier (runs in < 1ms, zero network lag)
  */
-function fastClassify(text) {
+export function fastClassify(text) {
   const clean = text.toLowerCase().trim();
 
-  // Clear single-phrase approvals
-  const approveRegex = /^(approve|approved|appr|yes|yep|yeah|yup|y|ok|okay|k|proceed|go ahead|do it|lgtm|looks good|sure|accept|confirm|allow|fine|make it so|ship it|do this)$/i;
-  if (approveRegex.test(clean)) {
+  // Strict single-word/short phrase approvals
+  const approveStrict = /^(approve|approved|appr|yes|yep|yeah|yup|y|ok|okay|k|proceed|go ahead|do it|lgtm|looks good|sure|accept|confirm|allow|fine|make it so|ship it|do this)$/i;
+  if (approveStrict.test(clean)) {
     return { intent: 'APPROVE', reply: 'Approved. Proceeding with changes.' };
   }
 
-  // Clear single-phrase rejections
-  const rejectRegex = /^(reject|rejected|rej|no|nah|nope|n|cancel|stop|abort|deny|disallow|dont|don't|halt|drop it)$/i;
-  if (rejectRegex.test(clean)) {
+  // Strict single-word/short phrase rejections
+  const rejectStrict = /^(reject|rejected|rej|no|nah|nope|n|cancel|stop|abort|deny|disallow|dont|don't|halt|drop it)$/i;
+  if (rejectStrict.test(clean)) {
     return { intent: 'REJECT', reply: 'Rejected. Changes aborted.' };
   }
 
+  // Multi-word phrase matching with negation detection
+  const hasApprove = /\b(approve|approved|lgtm|proceed|go ahead|looks good|do it|make it so|ship it|accept|confirm|allow)\b/i.test(clean);
+  const hasReject = /\b(reject|rejected|cancel|abort|stop|halt|deny|disallow|drop it)\b/i.test(clean);
+  const hasNegation = /\b(don't|dont|not|never|no|stop|wait|halt|nah|nope)\b/i.test(clean);
+
+  if (hasReject || hasNegation) {
+    return { intent: 'REJECT', reply: 'Rejected. Changes aborted.' };
+  }
+  if (hasApprove) {
+    return { intent: 'APPROVE', reply: 'Approved. Proceeding with changes.' };
+  }
+
   return null;
+}
+
+/**
+ * Asynchronously execute external CLI tool without blocking the Node.js event loop
+ */
+function runAsyncCLI(bin, args, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let timer = setTimeout(() => {
+        child.kill();
+        resolve(null);
+      }, timeoutMs);
+
+      child.stdout.on('data', (d) => { stdout += d.toString(); });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (code === 0 && stdout) {
+          resolve(stdout.trim());
+        } else {
+          resolve(null);
+        }
+      });
+      child.on('error', () => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+    } catch (e) {
+      resolve(null);
+    }
+  });
 }
 
 /**
@@ -86,7 +130,7 @@ function fastClassify(text) {
  * @returns {Promise<{ intent: 'APPROVE'|'REJECT'|'QUESTION'|'FEEDBACK', reply: string }>}
  */
 export async function comprehendMessage({ userMessage, agent = 'Antigravity', currentAction = '' }) {
-  // 1. Check fast path first
+  // 1. Instant check (<1ms)
   const fast = fastClassify(userMessage);
   if (fast) {
     appendHistory('user', 'User', userMessage);
@@ -99,51 +143,42 @@ export async function comprehendMessage({ userMessage, agent = 'Antigravity', cu
   const formattedConvo = history.map(h => `${h.role === 'user' ? 'User' : h.name}: ${h.text}`).join('\n');
 
   const prompt = `You are ${agent}, an AI coding assistant communicating with your developer via WhatsApp.
-You are asking for approval to make code changes on their system.
-
 Current proposed change: "${currentAction}"
-
 Recent Conversation History:
 ${formattedConvo}
 User: ${userMessage}
 
-Determine the user's intent from their message in this context:
-1. APPROVE: User agrees, says yes, gives green light, likes it, says go ahead, etc.
-2. REJECT: User denies, says no, tells you to stop, abort, don't do it, etc.
-3. QUESTION: User is asking for clarification, details, explanation, or files.
-4. FEEDBACK: User gives a modification instruction (e.g., "change the port to 3000 instead").
+Determine the user's intent:
+1. APPROVE: User agrees or gives go ahead.
+2. REJECT: User denies or halts.
+3. QUESTION: User asks questions.
+4. FEEDBACK: User gives code instructions.
 
-Reply ONLY with valid JSON with NO backticks or markdown:
-{"intent": "APPROVE" | "REJECT" | "QUESTION" | "FEEDBACK", "reply": "<Short 1-2 sentence response for WhatsApp>"}`;
+Reply ONLY with valid JSON:
+{"intent": "APPROVE" | "REJECT" | "QUESTION" | "FEEDBACK", "reply": "<Short 1-sentence response>"}`;
 
-  try {
-    // Try opencode CLI first
-    const proc = spawnSync('opencode', ['run', '--pure', '-m', 'opencode/nemotron-3.5-lightning-free', prompt], {
-      encoding: 'utf8',
-      timeout: 12000
-    });
+  const opencodeBin = path.join(os.homedir(), '.opencode', 'bin', 'opencode');
+  const bin = fs.existsSync(opencodeBin) ? opencodeBin : 'opencode';
 
-    if (proc.status === 0 && proc.stdout) {
-      const output = proc.stdout.trim();
-      // Extract JSON
-      const jsonMatch = output.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
+  const output = await runAsyncCLI(bin, ['run', '--pure', '-m', 'opencode/mimo-v2.5-free', prompt], 8000);
+  if (output) {
+    const jsonMatch = output.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
         const parsed = JSON.parse(jsonMatch[0]);
         if (parsed.intent && parsed.reply) {
           appendHistory('user', 'User', userMessage);
           appendHistory('agent', agent, parsed.reply);
           return parsed;
         }
-      }
+      } catch (e) {}
     }
-  } catch (err) {
-    // Fallback if opencode fails
   }
 
-  // Fallback heuristic if LLM call was unavailable
+  // Fallback heuristic if LLM took too long or was unavailable
   const lower = userMessage.toLowerCase();
   let intent = 'QUESTION';
-  let reply = `I received: "${userMessage}". Please reply 'approve' to proceed or 'reject' to abort.`;
+  let reply = `Understood: "${userMessage}". Reply 'approve' to proceed or 'reject' to cancel.`;
 
   if (/\b(good|go ahead|proceed|sure|yes|yeah|yep|looks good|fine|do it|okay|agree)\b/.test(lower) && !/\b(not|don't|dont|wait|stop|no)\b/.test(lower)) {
     intent = 'APPROVE';
@@ -159,7 +194,7 @@ Reply ONLY with valid JSON with NO backticks or markdown:
 }
 
 /**
- * Generate full conversational AI response for two-way WhatsApp chat
+ * Generate full conversational AI response for two-way WhatsApp chat (non-blocking)
  * @param {object} params
  * @param {string} params.userMessage
  * @param {string} [params.agent="Antigravity"]
@@ -170,31 +205,24 @@ export async function generateChatReply({ userMessage, agent = 'Antigravity' }) 
   const formattedConvo = history.map(h => `${h.role === 'user' ? 'User' : h.name}: ${h.text}`).join('\n');
 
   const prompt = `You are ${agent}, an expert AI coding assistant chatting with your developer directly via WhatsApp.
-Keep your response concise, friendly, and practical (2-4 sentences, suitable for reading on phone or smartwatch).
-
+Keep your response concise, friendly, and practical (1-3 sentences max).
 Recent Conversation History:
 ${formattedConvo}
 User: ${userMessage}
-
 Respond directly to the developer:`;
 
   const opencodeBin = path.join(os.homedir(), '.opencode', 'bin', 'opencode');
   const bin = fs.existsSync(opencodeBin) ? opencodeBin : 'opencode';
 
-  try {
-    const proc = spawnSync(bin, ['run', '--pure', '-m', 'opencode/mimo-v2.5-free', prompt], {
-      encoding: 'utf8',
-      timeout: 30000
-    });
-
-    if (proc.status === 0 && proc.stdout) {
-      const lines = proc.stdout.split('\n');
-      const filtered = lines.filter(l => !l.startsWith('>') && !l.includes('build ·')).join('\n').trim();
-      if (filtered) {
-        return filtered;
-      }
+  // Run with 8-second timeout so WhatsApp never hangs
+  const output = await runAsyncCLI(bin, ['run', '--pure', '-m', 'opencode/mimo-v2.5-free', prompt], 8000);
+  if (output) {
+    const lines = output.split('\n');
+    const filtered = lines.filter(l => !l.startsWith('>') && !l.includes('build ·')).join('\n').trim();
+    if (filtered) {
+      return filtered;
     }
-  } catch (err) {}
+  }
 
-  return `Got your instruction: "${userMessage}". Working on it right away!`;
+  return `Got your message: "${userMessage}". Forwarded to active Antigravity session!`;
 }
