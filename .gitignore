@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# WhatsApp session data & tokens (CRITICAL)
+ai-notify/sessions/
+sessions/
+auth_info_baileys/
+*.session
+creds.json
+app-state-sync-*.json
+
+# Temporary pairing assets
+qr.html
+qr.txt
+*.png
+*.svg
+
+# Local logs and PID files
+*.log
+*.pid
+daemon.log
+
+# Environment variables & personal config
+.env
+.env.*
+config.json
+conversation.json
+
+# OS generated
+.DS_Store
+Thumbs.db

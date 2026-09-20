@@ -1,0 +1,7 @@
+{
+  "port": 49321,
+  "timeoutMs": 180000,
+  "recipient": null,
+  "defaultAgent": "Antigravity",
+  "conversationId": null
+}

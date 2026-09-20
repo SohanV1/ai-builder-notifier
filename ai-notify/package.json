@@ -1,0 +1,32 @@
+{
+  "name": "ai-notify",
+  "version": "1.0.0",
+  "description": "WhatsApp notification and approval bridge for AI coding agents (Antigravity, Codex, OpenCode)",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "ai-notify": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "daemon": "node index.js daemon start",
+    "connect": "node index.js --connect"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.24",
+    "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "ai-agents",
+    "antigravity",
+    "codex",
+    "opencode",
+    "notifications",
+    "cmf-watch"
+  ],
+  "license": "MIT"
+}
