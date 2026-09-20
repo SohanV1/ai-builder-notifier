@@ -182,9 +182,9 @@ Respond directly to the developer:`;
   const bin = fs.existsSync(opencodeBin) ? opencodeBin : 'opencode';
 
   try {
-    const proc = spawnSync(bin, ['run', '--pure', '-m', 'opencode/nemotron-3.5-lightning-free', prompt], {
+    const proc = spawnSync(bin, ['run', '--pure', '-m', 'opencode/mimo-v2.5-free', prompt], {
       encoding: 'utf8',
-      timeout: 25000
+      timeout: 30000
     });
 
     if (proc.status === 0 && proc.stdout) {
