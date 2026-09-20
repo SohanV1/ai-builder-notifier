@@ -333,8 +333,14 @@ export function setupChatBridge(sock) {
         const convoId = config.conversationId || process.env.ANTIGRAVITY_CONVERSATION_ID || null;
         if (convoId) {
           try {
-            spawnSync('agentapi', ['send-message', '--title=WhatsApp from User', convoId, body], { timeout: 3000 });
-          } catch (e) {}
+            const agentapiBin = [
+              path.join(os.homedir(), '.gemini', 'antigravity-cli', 'bin', 'agentapi'),
+              '/home/sohan/.gemini/antigravity-cli/bin/agentapi'
+            ].find(p => fs.existsSync(p)) || 'agentapi';
+            spawnSync(agentapiBin, ['send-message', '--title=WhatsApp from User', convoId, `[From WhatsApp] ${body}`], { timeout: 5000 });
+          } catch (e) {
+            console.error('[ai-notify-bridge] agentapi error:', e.message);
+          }
         }
 
         const agentName = config.defaultAgent || 'Antigravity';
