@@ -178,10 +178,13 @@ User: ${userMessage}
 
 Respond directly to the developer:`;
 
+  const opencodeBin = path.join(os.homedir(), '.opencode', 'bin', 'opencode');
+  const bin = fs.existsSync(opencodeBin) ? opencodeBin : 'opencode';
+
   try {
-    const proc = spawnSync('opencode', ['run', '--pure', '-m', 'opencode/nemotron-3.5-lightning-free', prompt], {
+    const proc = spawnSync(bin, ['run', '--pure', '-m', 'opencode/nemotron-3.5-lightning-free', prompt], {
       encoding: 'utf8',
-      timeout: 15000
+      timeout: 25000
     });
 
     if (proc.status === 0 && proc.stdout) {
@@ -193,5 +196,5 @@ Respond directly to the developer:`;
     }
   } catch (err) {}
 
-  return `Received: "${userMessage}". I'm actively monitoring your workspace and codebase!`;
+  return `Got your instruction: "${userMessage}". Working on it right away!`;
 }
